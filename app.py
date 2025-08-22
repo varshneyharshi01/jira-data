@@ -20,7 +20,7 @@ JIRA_TOKEN  = st.secrets["jira"]["token"]
 PROJECT_KEYS = st.secrets["jira"].get("project_keys", ["YTCS", "DS"])
 CATEGORY_SOURCE = st.secrets["jira"].get("category_source", "labels").lower()
 CUSTOMFIELD_ID = st.secrets["jira"].get("customfield_id", "")
-PRIMARY_CATS = [c.upper() for c in st.secrets["jira"].get("categories", ["VL","CS","POC"])]
+PRIMARY_CATS = [c.upper() for c in st.secrets["jira"].get("categories", ["VL","CS","POC","ClipFlow"])]
 
 # ---------- Sidebar filters ----------
 with st.sidebar:
