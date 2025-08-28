@@ -10,7 +10,7 @@ import plotly.express as px
 
 # ---------- Page ----------
 st.set_page_config(page_title="Context Switching Dashboard", layout="wide")
-st.title("🖥️ Jira Context Switching Dashboard (Live)")
+st.title("🖥️ Jira Dashboard")
 
 # ---------- Leave Management UI ----------
 st.subheader("📅 Leave Management")
@@ -452,8 +452,8 @@ if not df.empty:
     # Get unique assignees from the data
     unique_assignees = sorted(df["Assignee"].unique())
     
-    st.subheader("📅 Leave Management")
-    st.caption("Enter leave days for team members this week to adjust efficiency calculations")
+    # st.subheader("📅 Leave Management")
+    # st.caption("Enter leave days for team members this week to adjust efficiency calculations")
     
     # Create leave input interface without form
     col1, col2, col3 = st.columns([2, 1, 1])
@@ -749,6 +749,13 @@ else:
 st.subheader("📈 Workload Distribution per User")
 fig_bar = px.bar(
     weekly_summary, x="Assignee", y="Tickets", color="Category", barmode="stack",
+    color_discrete_map={
+        "VL": "#e91e63",      # Pink/Magenta
+        "CS": "#9c27b0",      # Purple
+        "POC": "#3f51b5",     # Indigo
+        "ClipFlow": "#00bcd4", # Cyan
+        "OTHERS": "#8bc34a"   # Light Green
+    }
 )
 st.plotly_chart(fig_bar, use_container_width=True)
 
