@@ -31,7 +31,7 @@ JIRA_TOKEN  = st.secrets["jira"]["token"]
 PROJECT_KEYS = st.secrets["jira"].get("project_keys", ["YTCS", "DS"])
 CATEGORY_SOURCE = st.secrets["jira"].get("category_source", "labels").lower()
 CUSTOMFIELD_ID = st.secrets["jira"].get("customfield_id", "")
-PRIMARY_CATS = [c.upper() for c in st.secrets["jira"].get("categories", ["VL","CS","POC","ClipFlow"])]
+PRIMARY_CATS = [c.upper() for c in st.secrets["jira"].get("categories", ["VL","CS","POC","ClipFlow","LearnApp","product","Management","FOS","Analytics","research"])]
 
 # Project efficiency rules
 PROJECT_RULES = {
@@ -423,10 +423,15 @@ def compute_summaries(df):
         .fillna(0)
         .astype(int)
     )
-    for c in ["VL","CS","POC","OTHERS"]:
+    
+    # Include all categories from PRIMARY_CATS plus OTHERS
+    all_categories = [cat for cat in PRIMARY_CATS] + ["OTHERS"]
+    for c in all_categories:
         if c not in pivot.columns:
             pivot[c] = 0
-    pivot = pivot[["VL","CS","POC","OTHERS"]]  # consistent order
+    
+    # Reorder columns to show PRIMARY_CATS first, then OTHERS
+    pivot = pivot[all_categories]
     pivot["Total"] = pivot.sum(axis=1)
 
     # merge with switching
@@ -753,7 +758,13 @@ fig_bar = px.bar(
         "VL": "#e91e63",      # Pink/Magenta
         "CS": "#9c27b0",      # Purple
         "POC": "#3f51b5",     # Indigo
-        "ClipFlow": "#00bcd4", # Cyan
+        "CLIPFLOW": "#00bcd4", # Cyan
+        "LEARNAPP": "#ff9800", # Orange
+        "PRODUCT": "#6C88C4",  # Blue
+        "MANAGEMENT": "#795548", # Brown
+        "FOS": "#607d8b",     # Blue Grey
+        "ANALYTICS": "#f44336", # Red
+        "RESEARCH": "#FFEC59", # Yellow
         "OTHERS": "#8bc34a"   # Light Green
     }
 )
