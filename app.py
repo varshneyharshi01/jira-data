@@ -463,7 +463,7 @@ if not df.empty:
     with col2:
         st.write("**Leave Days**")
     with col3:
-        st.write("**Actionssss**")
+        st.write("**Actions**")
     
     # Create inputs for each assignee
     for assignee in unique_assignees:
