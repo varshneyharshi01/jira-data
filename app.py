@@ -39,6 +39,76 @@ PROJECT_RULES = {
     "DS": {"expected_points": 5},     # 5 points baseline
 }
 
+# ---------- Project Members Helper Function ----------
+def fetch_project_wise_members(project_keys):
+    """
+    Fetch ALL team members organized by project from Jira.
+    Returns a dictionary with project_key as key and list of ALL members as value.
+    This includes members with no current activity.
+    """
+    project_members = {}
+    
+    for project_key in project_keys:
+        project_members[project_key] = set()
+        
+        try:
+            # Method 1: Search for ALL issues assigned to users in this project (any status)
+            search_url = f"{JIRA_DOMAIN}/rest/api/3/search"
+            search_params = {
+                "jql": f'project = "{project_key}" AND assignee is not EMPTY',
+                "fields": "assignee",
+                "maxResults": 1000
+            }
+            
+            headers = {"Accept": "application/json"}
+            auth = HTTPBasicAuth(JIRA_EMAIL, JIRA_TOKEN)
+            
+            search_r = requests.get(search_url, headers=headers, params=search_params, auth=auth, timeout=30)
+            if search_r.status_code == 200:
+                search_data = search_r.json()
+                issues = search_data.get("issues", [])
+                
+                for issue in issues:
+                    assignee = issue.get("fields", {}).get("assignee")
+                    if assignee:
+                        display_name = assignee.get("displayName")
+                        if display_name and display_name != "Unassigned":
+                            project_members[project_key].add(display_name)
+            
+            # Method 2: Try to get project components and their assignees
+            try:
+                components_url = f"{JIRA_DOMAIN}/rest/api/3/project/{project_key}/components"
+                comp_r = requests.get(components_url, headers=headers, auth=auth, timeout=30)
+                if comp_r.status_code == 200:
+                    components = comp_r.json()
+                    for component in components:
+                        lead = component.get("lead")
+                        if lead and lead.get("displayName"):
+                            project_members[project_key].add(lead.get("displayName"))
+            except:
+                pass
+            
+            # Method 3: Try to get project roles and members
+            try:
+                roles_url = f"{JIRA_DOMAIN}/rest/api/3/project/{project_key}/role"
+                roles_r = requests.get(roles_url, headers=headers, auth=auth, timeout=30)
+                if roles_r.status_code == 200:
+                    roles_data = roles_r.json()
+                    # This gives us role URLs, we could fetch each role's members
+                    # For now, we'll rely on the issue-based method above
+            except:
+                pass
+                
+        except Exception as e:
+            st.warning(f"Could not fetch members for project {project_key}: {str(e)}")
+            continue
+    
+    # Convert sets to sorted lists
+    for project_key in project_members:
+        project_members[project_key] = sorted(list(project_members[project_key]))
+    
+    return project_members
+
 # ---------- Sprint Helper Function ----------
 def fetch_active_sprint(project_key):
     """
@@ -164,7 +234,7 @@ with st.sidebar:
         selected_projects = PROJECT_KEYS if PROJECT_KEYS else []
     else:
         selected_projects = [selected_project_filter]
-    
+
     if not selected_projects:
         st.warning("⚠️ No projects available. Please check your configuration.")
         st.stop()
@@ -454,11 +524,19 @@ if df.empty:
 
 # ---------- Dynamic Leave Management UI ----------
 if not df.empty:
-    # Get unique assignees from the data
-    unique_assignees = sorted(df["Assignee"].unique())
+    # Get ALL team members from project teams for leave management
+    try:
+        project_wise_members = fetch_project_wise_members(selected_projects)
+        all_team_members = set()
+        for members in project_wise_members.values():
+            all_team_members.update(members)
+        all_team_members = sorted(list(all_team_members))
+    except Exception as e:
+        st.warning(f"Could not fetch all team members: {str(e)}")
+        # Fallback to current data assignees
+        all_team_members = sorted(df["Assignee"].unique())
     
-    # st.subheader("📅 Leave Management")
-    # st.caption("Enter leave days for team members this week to adjust efficiency calculations")
+    st.info(f"👥 **Leave Management for ALL {len(all_team_members)} team members**")
     
     # Create leave input interface without form
     col1, col2, col3 = st.columns([2, 1, 1])
@@ -470,8 +548,8 @@ if not df.empty:
     with col3:
         st.write("**Actions**")
     
-    # Create inputs for each assignee
-    for assignee in unique_assignees:
+    # Create inputs for each team member
+    for assignee in all_team_members:
         if assignee != "Unassigned":
             col1, col2, col3 = st.columns([2, 1, 1])
             
@@ -522,53 +600,79 @@ else:
 # ---------- UI: Efficiency Summary ----------
 st.subheader("⚡ Efficiency Summary")
 if not df.empty and "Story Points" in df.columns:
-    # Aggregate totals per user with project grouping
+    # First, fetch project-wise team members
+    try:
+        project_wise_members = fetch_project_wise_members(selected_projects)
+        
+        # Display project teams
+        st.subheader("👥 Project Teams")
+        for project_key, members in project_wise_members.items():
+            if members:
+                st.info(f"**{project_key} Team ({len(members)} members):** {', '.join(members)}")
+            else:
+                st.warning(f"**{project_key} Team:** No members found")
+    except Exception as e:
+        st.warning(f"Could not fetch project teams: {str(e)}")
+        project_wise_members = {}
+    
+    # Aggregate totals per user with project grouping (only for users with actual data)
     summary_df = (
         df.groupby(["Assignee", "Project"])
           .agg({"Story Points": "sum"})
           .reset_index()
     )
     
-    # Calculate adjusted efficiency based on leave days
+    # Create efficiency data for ALL members from project teams
     efficiency_data = []
     
-    for _, row in summary_df.iterrows():
-        assignee = row["Assignee"]
-        project = row["Project"]
-        completed_points = row["Story Points"]
-        
-        # Get leave days for this assignee
-        leave_days = st.session_state.leave_inputs.get(assignee, 0)
-        
-        # Calculate adjusted expected points based on leave and project rules
-        if project == "YTCS":
-            # YTCS: (5 - leave_days) * 3 points expected
-            working_days = 5 - leave_days
-            expected_points = working_days * 3
-        elif project == "DS":
-            # DS: (5 - leave_days) * 1 point expected
-            working_days = 5 - leave_days
-            expected_points = working_days * 1
-        else:
-            # Unknown project, skip but log it
-            st.warning(f"⚠️ Unknown project '{project}' for {assignee}, skipping efficiency calculation")
-            continue
-        
-        # Calculate efficiency percentage (avoid division by zero)
-        if expected_points > 0:
-            efficiency = (completed_points / expected_points) * 100
-        else:
-            efficiency = 0 if completed_points == 0 else 100  # If no work expected but work done
-        
-        efficiency_data.append({
-            "Assignee": assignee,
-            "Project": project,
-            "Completed Points": completed_points,
-            "Expected Points": expected_points,
-            "Efficiency %": round(efficiency, 2),
-            "Leave Days": leave_days,
-            "Working Days": working_days
-        })
+    # Get all unique projects from the data
+    unique_projects = df["Project"].unique() if not df.empty else selected_projects
+    
+    # Show ALL members from project teams, including those with 0 efficiency
+    for project_key, all_members in project_wise_members.items():
+        for member in all_members:
+            # Check if this member has any tickets in the current sprint data
+            member_data = summary_df[(summary_df["Assignee"] == member) & (summary_df["Project"] == project_key)]
+            
+            if not member_data.empty:
+                # Member has tickets in current sprint
+                completed_points = member_data.iloc[0]["Story Points"]
+            else:
+                # Member has no tickets in current sprint - show 0 efficiency
+                completed_points = 0
+            
+            # Get leave days for this assignee
+            leave_days = st.session_state.leave_inputs.get(member, 0)
+            
+            # Calculate adjusted expected points based on leave and project rules
+            if project_key == "YTCS":
+                # YTCS: (5 - leave_days) * 3 points expected
+                working_days = 5 - leave_days
+                expected_points = working_days * 3
+            elif project_key == "DS":
+                # DS: (5 - leave_days) * 1 point expected
+                working_days = 5 - leave_days
+                expected_points = working_days * 1
+            else:
+                # Unknown project, skip but log it
+                st.warning(f"⚠️ Unknown project '{project_key}' for {member}, skipping efficiency calculation")
+                continue
+            
+            # Calculate efficiency percentage (avoid division by zero)
+            if expected_points > 0:
+                efficiency = (completed_points / expected_points) * 100
+            else:
+                efficiency = 0 if completed_points == 0 else 100  # If no work expected but work done
+            
+            efficiency_data.append({
+                "Assignee": member,
+                "Project": project_key,
+                "Completed Points": completed_points,
+                "Expected Points": expected_points,
+                "Efficiency %": round(efficiency, 2),
+                "Leave Days": leave_days,
+                "Working Days": working_days
+            })
     
     # Create efficiency dataframe
     efficiency_df = pd.DataFrame(efficiency_data)
