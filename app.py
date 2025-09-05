@@ -588,6 +588,74 @@ if not df.empty:
             if days > 0
         ]))
 
+# ---------- Manager-Controlled Efficiency Points UI ----------
+st.subheader("🎯 Manager-Controlled Efficiency Points")
+st.caption("As a manager, set the total points for the entire team this week. Individual member points will be calculated based on their working days.")
+
+# Initialize manual efficiency points in session state
+if 'manual_efficiency_points' not in st.session_state:
+    st.session_state.manual_efficiency_points = {}
+
+# Create manual efficiency points interface
+col1, col2, col3 = st.columns([2, 1, 1])
+
+with col1:
+    st.write("**Project**")
+with col2:
+    st.write("**Total Points**")
+with col3:
+    st.write("**Actions**")
+
+for project_key in selected_projects:
+    col1, col2, col3 = st.columns([2, 1, 1])
+    
+    with col1:
+        st.write(f"**{project_key}**")
+        if project_key == "YTCS":
+            st.caption("Default: 15 points (3/day × 5 days)")
+        elif project_key == "DS":
+            st.caption("Default: 5 points (1/day × 5 days)")
+        else:
+            st.caption("Set custom total points for this project")
+    
+    with col2:
+        # Get current manual points or default to None
+        current_points = st.session_state.manual_efficiency_points.get(project_key, None)
+        manual_points = st.number_input(
+            f"Total points for {project_key}",
+            min_value=0,
+            max_value=50,
+            value=current_points if current_points is not None else 0,
+            key=f"manual_points_{project_key}",
+            label_visibility="collapsed",
+            help="Enter 0 to use automatic calculation, or set custom total points for the team"
+        )
+        
+        # Store in session state (0 means use automatic)
+        if manual_points > 0:
+            st.session_state.manual_efficiency_points[project_key] = manual_points
+        else:
+            # Remove from session state to use automatic calculation
+            if project_key in st.session_state.manual_efficiency_points:
+                del st.session_state.manual_efficiency_points[project_key]
+    
+    with col3:
+        if st.button("Reset", key=f"reset_manual_{project_key}"):
+            if project_key in st.session_state.manual_efficiency_points:
+                del st.session_state.manual_efficiency_points[project_key]
+            st.rerun()
+
+# Show current manual points summary
+if any(v is not None for v in st.session_state.manual_efficiency_points.values()):
+    st.success("**Manager-Controlled Mode Active:** " + ", ".join([
+        f"{project}: {points} points" 
+        for project, points in st.session_state.manual_efficiency_points.items() 
+        if points is not None and points > 0
+    ]))
+    st.caption("💡 Individual member points will be calculated as: (Working Days / 5) × Total Points")
+else:
+    st.info("**Using automatic efficiency calculations** (based on project rates)")
+
 weekly_summary, per_day, user_summary = compute_summaries(df)
 
 # ---------- UI: Summary table ----------
@@ -644,19 +712,29 @@ if not df.empty and "Story Points" in df.columns:
             # Get leave days for this assignee
             leave_days = st.session_state.leave_inputs.get(member, 0)
             
-            # Calculate adjusted expected points based on leave and project rules
-            if project_key == "YTCS":
-                # YTCS: (5 - leave_days) * 3 points expected
-                working_days = 5 - leave_days
-                expected_points = working_days * 3
-            elif project_key == "DS":
-                # DS: (5 - leave_days) * 1 point expected
-                working_days = 5 - leave_days
-                expected_points = working_days * 1
+            # Calculate expected points - check for manual points first
+            working_days = 5 - leave_days
+            manual_points = st.session_state.manual_efficiency_points.get(project_key, None)
+            
+            if manual_points is not None and manual_points > 0:
+                # Manager-controlled mode: Individual expected points based on working days ratio
+                # Total points are for a full 5-day week, so adjust based on individual working days
+                expected_points = (working_days / 5) * manual_points
+                calculation_method = "Manager Controlled"
             else:
-                # Unknown project, skip but log it
-                st.warning(f"⚠️ Unknown project '{project_key}' for {member}, skipping efficiency calculation")
-                continue
+                # Automatic calculation based on project rules
+                if project_key == "YTCS":
+                    # YTCS: (5 - leave_days) * 3 points expected
+                    expected_points = working_days * 3
+                    calculation_method = "Auto"
+                elif project_key == "DS":
+                    # DS: (5 - leave_days) * 1 point expected
+                    expected_points = working_days * 1
+                    calculation_method = "Auto"
+                else:
+                    # Unknown project, skip but log it
+                    st.warning(f"⚠️ Unknown project '{project_key}' for {member}, skipping efficiency calculation")
+                    continue
             
             # Calculate efficiency percentage (avoid division by zero)
             if expected_points > 0:
@@ -668,7 +746,7 @@ if not df.empty and "Story Points" in df.columns:
                 "Assignee": member,
                 "Project": project_key,
                 "Completed Points": completed_points,
-                "Expected Points": expected_points,
+                "Expected Points": round(expected_points, 2),
                 "Efficiency %": round(efficiency, 2),
                 "Leave Days": leave_days,
                 "Working Days": working_days
@@ -699,6 +777,12 @@ if not df.empty and "Story Points" in df.columns:
         
         # Display efficiency table
         st.dataframe(efficiency_df, use_container_width=True)
+        
+        # Show calculation method info
+        if any(st.session_state.manual_efficiency_points.values()):
+            st.info("🎯 **Manager-controlled efficiency** - Total points set by manager, individual points calculated based on working days")
+        else:
+            st.info("🤖 **Automatic efficiency calculations** - Based on standard project rates")
         
         # Create efficiency bar chart using plotly
         chart_title = f"Efficiency per User & Project (Adjusted for Leave){sprint_info}"
